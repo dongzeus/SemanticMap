@@ -90,7 +90,7 @@ class Task():
         self.scheduler = ReduceLROnPlateau(self.optimizer, factor=0.1, patience=10, mode='min')
 
         # Loss Function
-        self.loss = torch.nn.SmoothL1Loss(reduction='elementwise_mean')
+        self.loss = torch.nn.MSELoss()
 
         # Load model given a checkPoint
         if self.checkPoint != "":
@@ -147,11 +147,57 @@ class Task():
             seq_lengths, perm_idx = sort_batch(instruction_idx)  # input in numpy and return in tensor
             instruction_idx = torch.from_numpy(instruction_idx).long()
             seq_lengths = seq_lengths.long()
+            
+            # Norm
+            # print objs.shape,objs[0]
 
-            # require grad
-            # objs = objs.requires_grad_()
-            # target_bb = target_bb.requires_grad_()
-            # instruction_idx = instruction_idx.requires_grad_()
+            with torch.no_grad():
+                bs, dim_N, fea = objs.size()
+                objs_label = objs[:,:,:1]
+                objs_feature = objs[:,:,1:]
+                num_regions = []    # the number of regions in each batch
+                batch_mean = []  # the mean of non-zero element in each batch
+                for batch_iter in range(bs):
+                    tmpfeature = objs_feature[batch_iter]   # dim_N * 4
+                    total_sum = 0
+                    for i in range(self.objNumMax):
+                        tmp_sum = tmpfeature[i].sum().item()
+                        if tmp_sum !=0:
+                            total_sum += tmp_sum
+                        else:
+                            batch_mean.append(total_sum/((fea-1)*i))
+                            num_regions.append(i)
+                            break
+
+                for batch_iter in range(bs):
+                    try:
+                        num_r = num_regions[batch_iter]  # number of region proposals
+                    except:
+                        print "Error!",batch_iter
+                        exit(1)
+                    tmp_mean = torch.tensor([batch_mean[batch_iter]]).unsqueeze(1).repeat(num_r, fea - 1)
+                    tmp_mean = torch.cat((tmp_mean, torch.zeros(self.objNumMax - num_r, fea - 1)),0)
+                    objs_feature[batch_iter] = objs_feature[batch_iter] - tmp_mean
+
+                objs = torch.cat((objs_label,objs_feature),2)
+
+                # print objs_feature.size(),bs
+                # objs_f_flat = objs_feature.contiguous().view(bs,dim_N * (fea-1))
+                # objs_f_mean = torch.mean(objs_f_flat, 1,keepdim=True)
+                # objs_f_mean_in = objs_f_mean.unsqueeze(2).repeat(1,dim_N,fea-1)
+
+                # objs_mean_ta = objs_mean.unsqueeze(1).repeat(1,4)
+                #objs_max = torch.max(objs_flat, 1)[0]
+                # print objs_max.shape
+                # exit(1)
+                #objs_max_in = objs_max.unsqueeze(1).unsqueeze(2).repeat(1,dim_N,fea)
+                # objs_max_ta = objs_max.unsqueeze(1).repeat(1,4)
+                # objs_feature = objs_feature - objs_f_mean_in 
+                # objs = torch.cat((objs_label,objs_feature),2)
+                # target_bb = (target_bb - objs_mean_ta) / objs_max_ta
+
+            # print objs.shape,objs[0]
+            # exit(1)
 
             # to cuda
             if torch.cuda.is_available():

@@ -28,13 +28,15 @@ class FCOutputModel(nn.Module):
 
 
 class RN(nn.Module):
-    def __init__(self, batch_size, num_objects, vocab_size, embedding_size=256, hidden_size=512, padding_idx = padding_idx,
-                 dropout_ratio = 0.5, featureChannel=5, outFeatureChannel=256, dropout= True):
+    def __init__(self, batch_size, num_objects, vocab_size, label_num = 60, label_feature = 32, embedding_size=256, hidden_size=512, padding_idx = padding_idx,
+                 dropout_ratio = 0.5, featureChannel=36, outFeatureChannel=256, dropout= True):
         super(RN, self).__init__()
         if torch.cuda.is_available():
             cuda_flag = True
         else:
             cuda_flag = False
+        self.label_num = label_num
+        self.label_embedding = nn.Embedding(label_num, label_feature)
 
         self.final_feature_size = (featureChannel)*2 + hidden_size
         self.outFeatureChannel = outFeatureChannel
@@ -63,24 +65,26 @@ class RN(nn.Module):
         N = input_feature.size(1) # the number of region proposals
         assert N==self.num_objects, "The number of region proposals are not equal"
         f_size = input_feature.size(2) # the feature size of input feature
-        assert f_size == self.featureChannel, 'feature channel not equal!'
+        #assert f_size == self.featureChannel, 'feature channel not equal!'
         instrucEmbed = self.embedding(input_sent,input_sentlen) # bs * 512
 
-
-        f_flat = input_feature
+        label_feature = self.label_embedding(input_feature[:,:,:1].type(torch.cuda.LongTensor)).squeeze()
+        f_flat = torch.cat((input_feature[:,:,1:], label_feature),2)    # bs * N * 36
         
         instrucEmbed = torch.unsqueeze(instrucEmbed,1)  # bs * 1 * 512
         instrucEmbed = instrucEmbed.repeat(1, N, 1) #bs * N *512
         instrucEmbed = torch.unsqueeze(instrucEmbed, 2) # bs * N * 1 * 512
 
         #cast al pairs against each other
-        f_i = torch.unsqueeze(f_flat, 1)  # bs * 1 * N * 5
-        f_i = f_i.repeat(1,N,1,1)   # bs x N x N x 5
-        f_j = torch.unsqueeze(f_flat, 2) # bs x N x 1 x 5
-        f_j = torch.cat([f_j,instrucEmbed],3)   # bs x N x 1 x 517
-        f_j = f_j.repeat(1,1,N,1) # bs x N x N x 517
+        f_i = torch.unsqueeze(f_flat, 1)  # bs * 1 * N * 36
+        f_i = f_i.repeat(1,N,1,1)   # bs x N x N x 36
+        f_j = torch.unsqueeze(f_flat, 2) # bs x N x 1 x 36
+        #print f_j.shape,instrucEmbed.shape
+        f_j = torch.cat([f_j,instrucEmbed],3)   # bs x N x 1 x 548
+        f_j = f_j.repeat(1,1,N,1) # bs x N x N x 548
 
-        f_full = torch.cat([f_i, f_j],3) # bs x N x N x 522
+        #print f_i.shape,f_j.shape
+        f_full = torch.cat([f_i, f_j],3) # bs x N x N x 584
 
         #reshape for passing the network
         f_ = f_full.view(bs*N*N,self.final_feature_size)
@@ -163,7 +167,7 @@ if __name__ == '__main__':
     batch_size=2
     num_objects=7
     vocab_size=100
-    input_feature = torch.randn(batch_size,num_objects, 7).cuda()
+    input_feature = torch.randn(batch_size,num_objects, 5).cuda()
     input_sent = torch.LongTensor([[1,2],[3,4]]).cuda()
     input_length = [2,2]
     y = model(input_feature,input_sent, input_length)
